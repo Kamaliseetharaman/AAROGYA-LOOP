@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AarogyaLoop - Medicine Check</title>
+<style>
+  *{box-sizing:border-box;font-family:system-ui,Arial,sans-serif}
+  body{margin:0;background:#f3f0ff;color:#222}
+  header{background:#6d28d9;color:#fff;padding:14px;text-align:center;font-size:20px;font-weight:700}
+  .tabs{display:flex;background:#fff;border-bottom:2px solid #ddd}
+  .tabs button{flex:1;padding:14px;border:0;background:none;font-size:16px;cursor:pointer}
+  .tabs button.active{border-bottom:4px solid #6d28d9;color:#6d28d9;font-weight:700}
+  .view{display:none;padding:18px;max-width:520px;margin:auto}
+  .view.active{display:block}
+  .card{background:#fff;border-radius:16px;padding:18px;margin-bottom:14px;box-shadow:0 2px 8px #0001}
+  .mic{width:130px;height:130px;border-radius:50%;border:0;background:#6d28d9;color:#fff;font-size:56px;cursor:pointer;display:block;margin:16px auto}
+  .mic.listening{background:#dc2626;animation:pulse 1s infinite}
+  @keyframes pulse{50%{transform:scale(1.1)}}
+  .btn{padding:12px 18px;border:0;border-radius:10px;font-size:16px;cursor:pointer;margin:4px}
+  .yes{background:#16a34a;color:#fff}.no{background:#dc2626;color:#fff}
+  .status{padding:14px;border-radius:12px;font-size:18px;font-weight:700;text-align:center}
+  .s-taken{background:#dcfce7;color:#166534}
+  .s-missed{background:#fee2e2;color:#991b1b}
+  .s-pending{background:#fef9c3;color:#854d0e}
+  .log{border-left:5px solid #ccc;padding:8px 12px;margin:8px 0;background:#fafafa;border-radius:6px}
+  .log.taken{border-color:#16a34a}.log.missed{border-color:#dc2626}
+  small{color:#666}
+  select{padding:8px;border-radius:8px}
+  .alert{display:none;background:#dc2626;color:#fff;padding:12px;border-radius:12px;margin-bottom:12px;font-weight:700}
+</style>
+</head>
+<body>
+<header>🩺 AarogyaLoop</header>
+<div class="tabs">
+  <button class="active" onclick="show('patient',this)">Patient</button>
+  <button onclick="show('caregiver',this)">Caregiver</button>
+  <button onclick="show('doctor',this)">Doctor</button>
+</div>
+
+<!-- PATIENT -->
+<div id="patient" class="view active">
+  <div class="card">
+    <h3>Hello! Did you take your medicine?</h3>
+    <p>💊 <b>Metformin 500mg</b> – Morning dose</p>
+    <label>Language: 
+      <select id="lang">
+        <option value="en-IN">English</option>
+        <option value="ta-IN">தமிழ் (Tamil)</option>
+      </select>
+    </label>
+    <button id="micBtn" class="mic" onclick="startListening()">🎤</button>
+    <p id="heard" style="text-align:center"><small>Tap the mic and say "Yes, I took the medicine" or "No, I did not take it"</small></p>
+    <div style="text-align:center">
+      <small>Mic not working? Use buttons:</small><br>
+      <button class="btn yes" onclick="record(true,'button')">✅ Yes, taken</button>
+      <button class="btn no" onclick="record(false,'button')">❌ No, not taken</button>
+    </div>
+  </div>
+  <div id="patientStatus" class="status s-pending">Waiting for your answer</div>
+</div>
+
+<!-- CAREGIVER -->
+<div id="caregiver" class="view">
+  <div id="cgAlert" class="alert">⚠️ Patient has NOT taken the medicine!</div>
+  <div class="card">
+    <h3>Caregiver Dashboard</h3>
+    <div id="cgStatus" class="status s-pending">No update yet today</div>
+  </div>
+  <div class="card"><h4>Recent updates</h4><div id="cgLog"></div></div>
+</div>
+
+<!-- DOCTOR -->
+<div id="doctor" class="view">
+  <div class="card">
+    <h3>Doctor Dashboard</h3>
+    <p><b>Patient:</b> Ravi Kumar &nbsp; <b>Prescription:</b> Metformin 500mg</p>
+    <div id="drStatus" class="status s-pending">No update yet today</div>
+  </div>
+  <div class="card"><h4>Adherence history</h4><div id="drLog"></div>
+    <p id="drScore"></p>
+    <button class="btn" onclick="clearAll()">Reset demo</button>
+  </div>
+</div>
+
+<script>
+const KEY = 'aarogya_logs';
+const channel = ('BroadcastChannel' in window) ? new BroadcastChannel('aarogya') : null;
+
+function show(id, btn){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function getLogs(){ try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return []} }
+
+function record(taken, via){
+  const logs = getLogs();
+  logs.unshift({taken, via, time: new Date().toLocaleString()});
+  localStorage.setItem(KEY, JSON.stringify(logs));
+  if(channel) channel.postMessage('update');
+  render();
+  speak(taken ? (lang()==='ta-IN' ? 'நன்றி, மருந்து எடுத்தது பதிவு செய்யப்பட்டது' : 'Thank you. Recorded that you took your medicine.')
+              : (lang()==='ta-IN' ? 'சரி, மருந்து எடுக்கவில்லை என்று பராமரிப்பாளருக்கும் மருத்துவருக்கும் தெரிவிக்கப்பட்டது' : 'Okay. Your caregiver and doctor have been notified that you did not take it.'));
+}
+
+function render(){
+  const logs = getLogs();
+  const last = logs[0];
+  const html = last
+    ? (last.taken ? ['s-taken','✅ Medicine TAKEN', ] : ['s-missed','❌ Medicine NOT taken'])
+    : ['s-pending','No update yet today'];
+  const sub = last ? ` <br><small>${last.time}</small>` : '';
+
+  ['patientStatus','cgStatus','drStatus'].forEach(id=>{
+    const el = document.getElementById(id);
+    el.className = 'status ' + html[0];
+    el.innerHTML = (id==='patientStatus' && !last ? 'Waiting for your answer' : html[1]) + sub;
+  });
+
+  document.getElementById('cgAlert').style.display = (last && !last.taken) ? 'block' : 'none';
+
+  const list = logs.map(l=>`<div class="log ${l.taken?'taken':'missed'}">${l.taken?'✅ Taken':'❌ Not taken'} <small>(${l.via}) – ${l.time}</small></div>`).join('') || '<small>Nothing yet</small>';
+  document.getElementById('cgLog').innerHTML = list;
+  document.getElementById('drLog').innerHTML = list;
+
+  const taken = logs.filter(l=>l.taken).length;
+  document.getElementById('drScore').innerHTML = logs.length
+    ? `<b>Adherence:</b> ${Math.round(taken/logs.length*100)}% (${taken}/${logs.length})` : '';
+}
+
+function lang(){ return document.getElementById('lang').value; }
+
+function speak(text){
+  if(!('speechSynthesis' in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang();
+  speechSynthesis.speak(u);
+}
+
+// Decide yes / no from the spoken sentence
+function interpret(text){
+  const t = text.toLowerCase();
+  const noWords = ['not','no ','no.','didn','did not','don','haven','never','illa','illai','இல்ல','இல்லை','எடுக்கல','எடுக்கவில்லை','போடல','சாப்பிடல'];
+  const yesWords = ['yes','yeah','yep','took','taken','have taken','done','ok','ஆம்','ஆமா','எடுத்தேன்','எடுத்துட்டேன்','சாப்பிட்டேன்','போட்டேன்','aama','eduthen','sapten'];
+  const padded = t + ' ';
+  if(noWords.some(w=>padded.includes(w))) return false;
+  if(yesWords.some(w=>t.includes(w))) return true;
+  return null;
+}
+
+function startListening(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const heard = document.getElementById('heard');
+  if(!SR){ heard.innerHTML = '⚠️ Voice not supported in this browser. Use Chrome, or tap the buttons below.'; return; }
+  const rec = new SR();
+  rec.lang = lang();
+  rec.interimResults = false;
+  const btn = document.getElementById('micBtn');
+  btn.classList.add('listening');
+  heard.innerHTML = '<b>Listening...</b>';
+  rec.onresult = e=>{
+    const text = e.results[0][0].transcript;
+    heard.innerHTML = `You said: <b>"${text}"</b>`;
+    const answer = interpret(text);
+    if(answer===null){ heard.innerHTML += '<br>Sorry, I did not understand. Please say yes or no.'; speak('Please say yes or no'); }
+    else record(answer,'voice');
+  };
+  rec.onerror = e=>{ heard.innerHTML = '⚠️ Mic error: '+e.error+'. Allow microphone permission or use the buttons.'; };
+  rec.onend = ()=>btn.classList.remove('listening');
+  rec.start();
+}
+
+function clearAll(){ localStorage.removeItem(KEY); if(channel) channel.postMessage('update'); render(); }
+
+// live sync between tabs/windows
+if(channel) channel.onmessage = ()=>render();
+window.addEventListener('storage', render);
+setInterval(render, 3000);
+render();
+</script>
+</body>
+</html>
